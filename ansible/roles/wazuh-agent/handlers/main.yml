@@ -1,0 +1,14 @@
+- name: restart wazuh-manager
+  systemd:
+    name: wazuh-manager
+    state: restarted
+
+- name: restart wazuh-agent
+  systemd:
+    name: wazuh-agent
+    state: restarted
+
+- name: restart filebeat
+  systemd:
+    name: filebeat
+    state: restarted

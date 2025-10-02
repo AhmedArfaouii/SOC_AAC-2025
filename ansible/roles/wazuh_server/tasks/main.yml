@@ -1,3 +1,0 @@
-﻿- name: Placeholder
-  debug:
-    msg: "Hello from wazuh_server"

@@ -1,0 +1,14 @@
+- hosts: wazuh
+  become: true
+  roles:
+    - ../roles/wazuh-manager
+
+- hosts: client
+  become: true
+  roles:
+    - ../roles/wazuh-agent
+
+- hosts: elk
+  become: true
+  roles:
+    - ../roles/wazuh-kibana

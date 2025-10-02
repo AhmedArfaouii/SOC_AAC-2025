@@ -1,0 +1,91 @@
+---
+# Install Kibana Wazuh plugin
+
+- name: Ensure Kibana is installed
+  apt:
+    name: kibana=7.17.9
+    state: present
+    update_cache: yes
+
+- name: Configure Kibana
+  copy:
+    dest: /etc/kibana/kibana.yml
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      server.host: "0.0.0.0"
+      elasticsearch.hosts: ["http://192.168.56.10:9200"]
+      server.name: "kibana"
+      elasticsearch.preserveHost: true
+      logging.dest: /var/log/kibana/kibana.log
+      i18n.locale: "en"
+
+- name: Ensure Kibana directories are owned by kibana
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: kibana
+    group: kibana
+    mode: '0755'
+  loop:
+    - /usr/share/kibana/data
+    - /var/log/kibana
+
+- name: Download Wazuh Kibana plugin
+  get_url:
+    url: "https://packages.wazuh.com/4.x/ui/kibana/wazuh_kibana-4.5.4_7.17.9-1.zip"
+    dest: /tmp/wazuh-kibana.zip
+    mode: '0644'
+
+- name: Remove existing Wazuh plugin if present
+  file:
+    path: /usr/share/kibana/plugins/wazuh
+    state: absent
+
+- name: Install Wazuh Kibana plugin
+  command: /usr/share/kibana/bin/kibana-plugin install file:///tmp/wazuh-kibana.zip
+  args:
+    creates: /usr/share/kibana/plugins/wazuh
+
+- name: Create Wazuh plugin config directory
+  file:
+    path: /usr/share/kibana/data/wazuh/config
+    state: directory
+    owner: kibana
+    group: kibana
+    mode: '0755'
+
+- name: Configure Wazuh Kibana plugin
+  copy:
+    dest: /usr/share/kibana/data/wazuh/config/wazuh.yml
+    owner: kibana
+    group: kibana
+    mode: '0644'
+    content: |
+      hosts:
+        - default:
+            url: http://192.168.56.11
+            port: 55000
+            username: admin
+            password: SecretPassword
+            run_as: false
+  notify: restart kibana
+
+- name: Enable and start Kibana
+  systemd:
+    name: kibana
+    enabled: true
+    state: started
+
+- name: Wait for Kibana API to respond
+  uri:
+    url: http://localhost:5601/api/status
+    method: GET
+    headers:
+      kbn-xsrf: "true"
+    status_code: 200
+  register: kibana_status
+  retries: 15
+  delay: 10
+  until: kibana_status.status == 200

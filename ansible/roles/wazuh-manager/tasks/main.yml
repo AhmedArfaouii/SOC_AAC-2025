@@ -1,0 +1,77 @@
+---
+# Install Wazuh Manager + Filebeat to forward alerts
+
+- name: Add Wazuh GPG key
+  apt_key:
+    url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+    state: present
+
+- name: Add Wazuh repository
+  apt_repository:
+    repo: "deb https://packages.wazuh.com/4.x/apt/ stable main"
+    state: present
+
+- name: Install Wazuh Manager (pinned version)
+  apt:
+    name: wazuh-manager=4.5.4-1
+    state: present
+    update_cache: yes
+    allow_downgrade: yes
+
+- name: Configure Wazuh API (no HTTPS for lab)
+  template:
+    src: wazuh-api-config.js.j2
+    dest: /var/ossec/api/configuration/config.js
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart wazuh-manager
+
+# ✅ Enable auto-registration
+- name: Enable agent auto-registration
+  lineinfile:
+    path: /var/ossec/etc/ossec.conf
+    insertafter: "<ossec_config>"
+    line: |
+      <auth>
+        <disabled>no</disabled>
+        <port>1515</port>
+        <use_source_ip>yes</use_source_ip>
+      </auth>
+  notify: restart wazuh-manager
+
+# Filebeat (already in role, but now guaranteed clean)
+- name: Add Elastic GPG key
+  apt_key:
+    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    state: present
+
+- name: Add Elastic 7.x APT repository
+  apt_repository:
+    repo: "deb https://artifacts.elastic.co/packages/7.x/apt stable main"
+    state: present
+    filename: 'elastic-7.x'
+
+- name: Install Filebeat for Wazuh
+  apt:
+    name: filebeat=7.17.9
+    state: present
+    update_cache: yes
+
+- name: Configure Filebeat for Wazuh alerts
+  template:
+    src: filebeat-wazuh.yml.j2
+    dest: /etc/filebeat/filebeat.yml
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart filebeat
+
+- name: Enable and start services
+  systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - wazuh-manager
+    - filebeat
