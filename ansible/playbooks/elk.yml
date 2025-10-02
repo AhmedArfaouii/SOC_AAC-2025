@@ -1,0 +1,4 @@
+- hosts: elk
+  become: true
+  roles:
+    - ../roles/elk

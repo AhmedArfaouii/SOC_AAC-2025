@@ -1,0 +1,68 @@
+﻿---
+- name: Add Elastic GPG key
+  apt_key:
+    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    state: present
+
+- name: Add Elastic 7.x repository
+  apt_repository:
+    repo: "deb https://artifacts.elastic.co/packages/7.x/apt stable main"
+    state: present
+
+- name: Install Filebeat
+  apt:
+    name: filebeat=7.17.9
+    state: present
+    update_cache: yes
+
+- name: Write filebeat.yml from template
+  template:
+    src: filebeat.yml.j2
+    dest: /etc/filebeat/filebeat.yml
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart filebeat
+
+# --- Suricata module ---
+- name: Deploy Suricata module config
+  copy:
+    dest: /etc/filebeat/modules.d/suricata.yml
+    content: |
+      - module: suricata
+        eve:
+          enabled: true
+          var.paths:
+            - /var/log/suricata/eve.json
+          var.convert_timezone: true
+  notify: restart filebeat
+
+- name: Ensure Suricata module is enabled
+  command: filebeat modules enable suricata
+  args:
+    creates: /etc/filebeat/modules.d/suricata.yml.disabled
+  register: suricata_module
+  changed_when: "'Enabled' in suricata_module.stdout"
+  notify: restart filebeat
+
+# --- Service ---
+- name: Enable and start Filebeat
+  systemd:
+    name: filebeat
+    enabled: true
+    state: started
+
+# --- Kibana Dashboards (run once only) ---
+- name: Load Filebeat dashboards into Kibana
+  command: filebeat setup --dashboards --modules suricata
+  args:
+    creates: /etc/filebeat/.dashboards_loaded
+  register: dashboard_setup
+  changed_when: "'Loaded dashboards' in dashboard_setup.stdout or 'already exists' in dashboard_setup.stdout"
+  notify: restart filebeat
+
+- name: Mark dashboards as loaded
+  file:
+    path: /etc/filebeat/.dashboards_loaded
+    state: touch
+  when: dashboard_setup is defined and dashboard_setup.rc == 0

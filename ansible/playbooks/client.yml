@@ -1,0 +1,31 @@
+---
+- hosts: client
+  become: true
+  tasks:
+    - name: Remove default NAT route immediately
+      command: ip route del default via 10.0.2.2 dev enp0s3
+      ignore_errors: yes   # in case it doesn’t exist
+
+    - name: Disable NAT NIC (enp0s3) immediately
+      command: ip link set enp0s3 down
+      ignore_errors: yes
+
+    - name: Deploy netplan config with only IDS as gateway
+      copy:
+        dest: /etc/netplan/01-client.yaml
+        content: |
+          network:
+            version: 2
+            ethernets:
+              enp0s8:
+                dhcp4: false
+                addresses: [192.168.56.14/24]
+                gateway4: 192.168.56.12
+        owner: root
+        group: root
+        mode: '0644'
+      notify: apply netplan
+
+  handlers:
+    - name: apply netplan
+      command: netplan apply

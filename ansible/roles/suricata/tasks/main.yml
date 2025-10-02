@@ -1,0 +1,141 @@
+﻿---
+# Install and configure Suricata IDS + ET Open rules + persistent NAT
+
+# --- PREP ---
+- name: Disable unattended-upgrades (avoid dpkg lock issues)
+  systemd:
+    name: unattended-upgrades
+    state: stopped
+    enabled: false
+  ignore_errors: true
+
+- name: Remove dpkg/apt locks if present
+  file:
+    path: "{{ item }}"
+    state: absent
+  with_items:
+    - /var/lib/dpkg/lock-frontend
+    - /var/lib/apt/lists/lock
+  ignore_errors: true
+
+# --- INSTALL SURICATA ---
+- name: Add Suricata stable PPA
+  apt_repository:
+    repo: ppa:oisf/suricata-stable
+    state: present
+    update_cache: yes
+
+- name: Install Suricata (includes suricata-update)
+  apt:
+    name: suricata
+    state: present
+    update_cache: yes
+
+# --- CONFIG ---
+- name: Deploy Suricata config with required vars
+  copy:
+    dest: /etc/suricata/suricata.yaml
+    content: |
+      %YAML 1.1
+      ---
+      vars:
+        address-groups:
+          HOME_NET: "[192.168.56.0/24]"
+          EXTERNAL_NET: "!$HOME_NET"
+          HTTP_SERVERS: "[192.168.56.10]"
+          SQL_SERVERS: "[$HOME_NET]"
+          SMTP_SERVERS: "[$HOME_NET]"
+          DNS_SERVERS: "[$HOME_NET]"
+          TELNET_SERVERS: "[$HOME_NET]"
+        port-groups:
+          HTTP_PORTS: "80,8080,8000,8888,81,591,2082,2086,2095,5555,3000,5000,5601,9000"
+          SHELLCODE_PORTS: "!80"
+          ORACLE_PORTS: "1521"
+          MSSQL_PORTS: "1433"
+          MYSQL_PORTS: "3306"
+          POSTGRES_PORTS: "5432"
+
+      af-packet:
+        - interface: enp0s8
+
+      outputs:
+        - eve-log:
+            enabled: yes
+            filetype: regular
+            filename: /var/log/suricata/eve.json
+            community-id: true
+            types:
+              - alert
+              - dns
+              - http
+              - tls
+              - flow
+            # extra metadata so src/dst always appear
+            flow:
+              enabled: yes
+              metadata: yes
+              extended: yes
+  notify: restart suricata
+
+
+# --- ET OPEN RULES ---
+- name: Update Suricata rules (ET Open) with test
+  command: suricata-update
+  register: suri_update
+  changed_when: "'No sources updated' not in suri_update.stdout"
+  failed_when: false
+  notify: reload suricata
+
+- name: Fallback update rules skipping suricata -T if test failed
+  command: suricata-update --no-test
+  when: suri_update.rc != 0
+  notify: reload suricata
+
+- name: Verify rules exist
+  stat:
+    path: /var/lib/suricata/rules/suricata.rules
+  register: rules_file
+
+- name: Fail if no rules are installed
+  fail:
+    msg: "No Suricata rules were installed!"
+  when: not rules_file.stat.exists
+
+# --- NAT CONFIG ---
+- name: Enable IPv4 forwarding
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    sysctl_set: yes
+
+- name: Install iptables-persistent
+  apt:
+    name: iptables-persistent
+    state: present
+    update_cache: yes
+
+- name: Ensure NAT POSTROUTING rule exists
+  iptables:
+    table: nat
+    chain: POSTROUTING
+    source: 192.168.56.0/24
+    jump: MASQUERADE
+    out_interface: "{{ ids_out_if | default('enp0s3') }}"
+    state: present
+
+- name: Save iptables rules (persistent)
+  command: netfilter-persistent save
+
+- name: Ensure netfilter-persistent is enabled at boot
+  systemd:
+    name: netfilter-persistent
+    enabled: true
+    state: started
+
+# --- SERVICE ---
+- name: Enable and start Suricata
+  systemd:
+    name: suricata
+    enabled: true
+    state: started

@@ -1,0 +1,19 @@
+# Vagrant/VirtualBox
+.vagrant/
+*.box
+
+# Vagrant private SSH keys
+.vagrant_keys/
+**/*.pem
+**/id_rsa*
+**/id_ed25519*
+
+# Ansible noise
+*.retry
+*.log
+__pycache__/
+*.swp
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
